@@ -146,11 +146,35 @@ def main():
                         conn.commit()
                         st.success("Données enregistrées en base !")
 
-            with tab2:
+           with tab2:
                 # On ne lit que les données de l'utilisateur connecté
                 c.execute('SELECT * FROM collectes WHERE user_email=?', (st.session_state.user_email,))
                 my_data = pd.DataFrame(c.fetchall(), columns=["ID", "User", "Date", "Patient", "Âge", "Poids", "Taille", "IMC", "Statut"])
-                st.dataframe(my_data)
+                
+                if not my_data.empty:
+                    st.subheader("📋 Historique des patients")
+                    st.dataframe(my_data, use_container_width=True)
+                    
+                    # --- NOUVEAU : AJOUT DU PIE CHART ---
+                    st.divider()
+                    st.subheader("📊 Répartition Nutritionnelle Globale")
+                    
+                    # Création du graphique avec des couleurs fixes pour la cohérence
+                    fig_pie = px.pie(
+                        my_data, 
+                        names="Statut", 
+                        hole=0.4, # Transforme le camembert en "Doughnut" plus moderne
+                        color="Statut",
+                        color_discrete_map={
+                            "Normal": "#2ecc71", # Vert
+                            "Alerte": "#e74c3c", # Rouge
+                            "Obésité": "#e67e22",# Orange
+                            "Surpoids": "#f1c40f" # Jaune
+                        }
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.info("Vous n'avez pas encore enregistré de patients.")
 
 if __name__ == '__main__':
     main()
