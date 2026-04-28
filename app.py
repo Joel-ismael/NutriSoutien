@@ -66,28 +66,34 @@ if not st.session_state.db.empty:
     with m2: st.metric("IMC Moyen", round(df["IMC"].mean(), 2))
     with m3: st.metric("Alertes (Insuffisance)", len(df[df["IMC"] < 18.5]))
 
-    # Graphiques d'Analyse Descriptive
+ # Graphiques d'Analyse Descriptive (Version Corrigée)
     st.divider()
     c1, c2 = st.columns(2)
 
     with c1:
         st.subheader("📊 Répartition par Statut")
-        fig_pie = px.pie(df, names="Statut", hole=0.4, color="Statut",
-                         color_discrete_map={"Poids normal":"#2ecc71", "Insuffisance pondérale":"#e74c3c", "Surpoids":"#f1c40f", "Obésité":"#e67e22"})
-        st.plotly_chart(fig_pie, use_container_width=True)
+        if not df["Statut"].empty:
+            fig_pie = px.pie(df, names="Statut", hole=0.4, 
+                             color="Statut",
+                             color_discrete_map={
+                                 "Poids normal":"#2ecc71", 
+                                 "Insuffisance pondérale":"#e74c3c", 
+                                 "Surpoids":"#f1c40f", 
+                                 "Obésité":"#e67e22"
+                             })
+            st.plotly_chart(fig_pie, use_container_width=True)
 
     with c2:
         st.subheader("📈 Évolution du Poids")
-        fig_line = px.scatter(df, x="Date", y="Poids", size="IMC", color="Statut", hover_name="Patient")
-        st.plotly_chart(fig_line, use_container_width=True)
-
-    # Tableau de données
-    st.subheader("📋 Registre des Patients")
-    st.dataframe(df, use_container_width=True)
-    
-    # Bouton d'exportation (Efficacité)
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Télécharger les données (CSV)", csv, "rapport_nutrisoutien.csv", "text/csv")
-
-else:
-    st.info("Le tableau de bord est vide. Veuillez remplir le formulaire à gauche pour générer l'analyse.")
+        # Correction : on vérifie que IMC est bien numérique et on gère les tailles
+        if not df.empty:
+            try:
+                # On force l'IMC en numérique pour éviter le ValueError
+                df["IMC"] = pd.to_numeric(df["IMC"])
+                fig_line = px.scatter(df, x="Date", y="Poids", 
+                                    size="IMC", color="Statut", 
+                                    hover_name="Patient",
+                                    size_max=30) # size_max aide à la stabilité
+                st.plotly_chart(fig_line, use_container_width=True)
+            except Exception as e:
+                st.error("Erreur d'affichage du graphique : données insuffisantes.")
