@@ -66,7 +66,7 @@ if not st.session_state.db.empty:
     with m2: st.metric("IMC Moyen", round(df["IMC"].mean(), 2))
     with m3: st.metric("Alertes (Insuffisance)", len(df[df["IMC"] < 18.5]))
 
- # Graphiques d'Analyse Descriptive (Version Corrigée)
+# Graphiques d'Analyse Descriptive (Version Corrigée)
     st.divider()
     c1, c2 = st.columns(2)
 
