@@ -1,99 +1,156 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import sqlite3
+import hashlib
+import re
 from datetime import datetime
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Le Nutri-Soutien Pro", page_icon="🥗", layout="wide")
+st.set_page_config(page_title="Nutri-Soutien Cloud", page_icon="🥗", layout="wide")
 
-# --- INITIALISATION ---
-if 'db' not in st.session_state:
-    st.session_state.db = pd.DataFrame(columns=["ID", "Date", "Patient", "Âge", "Poids", "Taille", "IMC", "Statut"])
+# --- STYLE CSS (Pour masquer GitHub) ---
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stAppDeployButton {display:none;}
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- FONCTIONS LOGIQUES ---
-def calculer_imc(poids, taille):
-    imc = poids / ((taille/100)**2)
-    if imc < 18.5: status = "Insuffisance pondérale"
-    elif 18.5 <= imc < 25: status = "Poids normal"
-    elif 25 <= imc < 30: status = "Surpoids"
-    else: status = "Obésité"
-    return round(imc, 2), status
+# --- INITIALISATION SQLITE ---
+def init_db():
+    conn = sqlite3.connect('nutrisoutien_data.db', check_same_thread=False)
+    c = conn.cursor()
+    # Table des utilisateurs
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                email TEXT PRIMARY KEY, firstname TEXT, lastname TEXT, 
+                phone TEXT, password TEXT, sex TEXT, nationality TEXT)''')
+    # Table des collectes (Liée à l'email de l'utilisateur)
+    c.execute('''CREATE TABLE IF NOT EXISTS collectes (
+                id_collecte TEXT, user_email TEXT, date TEXT, patient TEXT, 
+                age INTEGER, poids REAL, taille REAL, imc REAL, statut TEXT)''')
+    conn.commit()
+    return conn
 
-# --- INTERFACE ---
-st.title("🥗 Gestion du Nutri-Soutien")
+conn = init_db()
+c = conn.cursor()
 
-# Création des onglets pour une navigation professionnelle
-tab1, tab2, tab3 = st.tabs(["📥 Collecte & Dashboard", "🔍 Recherche & Gestion", "📊 Analyse Globale"])
+# --- FONCTIONS DE SÉCURITÉ ---
+def hash_pwd(pwd):
+    return hashlib.sha256(str.encode(pwd)).hexdigest()
 
-# --- ONGLET 1 : COLLECTE ---
-with tab1:
-    st.subheader("Enregistrement des données")
-    with st.form("ajout_patient"):
-        col1, col2 = st.columns(2)
-        with col1:
-            id_p = st.text_input("Identifiant Unique (ID)")
-            nom = st.text_input("Nom Complet")
-            age = st.number_input("Âge", 0, 110, 25)
-        with col2:
-            poids = st.number_input("Poids (kg)", 2.0, 200.0, 65.0)
-            taille = st.number_input("Taille (cm)", 50, 230, 170)
-            date = st.date_input("Date", datetime.now())
-        
-        btn_save = st.form_submit_button("Enregistrer")
+def check_phone(phone, code):
+    # Vérifie si le numéro commence par le code pays
+    return phone.startswith(code)
 
-    if btn_save:
-        if id_p in st.session_state.db["ID"].values:
-            st.error("Cet ID existe déjà ! Utilisez l'onglet Gestion pour modifier.")
-        elif id_p and nom:
-            imc, status = calculer_imc(poids, taille)
-            new_data = pd.DataFrame([[id_p, date, nom, age, poids, taille, imc, status]], columns=st.session_state.db.columns)
-            st.session_state.db = pd.concat([st.session_state.db, new_data], ignore_index=True)
-            st.success(f"Patient {nom} enregistré avec succès !")
+# --- LOGIQUE DE L'APPLICATION ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.user_email = ""
 
-# --- ONGLET 2 : RECHERCHE, MODIFIER, SUPPRIMER ---
-with tab2:
-    st.subheader("Gestion des dossiers patients")
-    search_id = st.text_input("Entrez l'ID du patient pour rechercher")
-    
-    if search_id:
-        patient_data = st.session_state.db[st.session_state.db["ID"] == search_id]
-        
-        if not patient_data.empty:
-            st.write("### Données actuelles :")
-            st.dataframe(patient_data)
+def main():
+    if not st.session_state.logged_in:
+        menu = ["Connexion", "Inscription"]
+        choice = st.sidebar.selectbox("Menu", menu)
+
+        if choice == "Inscription":
+            st.subheader("📝 Créer un compte professionnel")
+            col1, col2 = st.columns(2)
             
-            # --- MODIFICATION ---
-            st.divider()
-            st.write("#### Modifier les informations")
-            with st.expander("Cliquez ici pour modifier"):
-                with st.form("edit_form"):
-                    new_nom = st.text_input("Nouveau Nom", value=patient_data["Patient"].values[0])
-                    new_poids = st.number_input("Nouveau Poids", value=float(patient_data["Poids"].values[0]))
-                    new_taille = st.number_input("Nouvelle Taille", value=int(patient_data["Taille"].values[0]))
-                    btn_update = st.form_submit_button("Mettre à jour")
-                    
-                    if btn_update:
-                        new_imc, new_status = calculer_imc(new_poids, new_taille)
-                        st.session_state.db.loc[st.session_state.db["ID"] == search_id, ["Patient", "Poids", "Taille", "IMC", "Statut"]] = [new_nom, new_poids, new_taille, new_imc, new_status]
-                        st.success("Données mises à jour !")
-                        st.rerun()
+            with col1:
+                nom = st.text_input("Nom")
+                prenom = st.text_input("Prénom")
+                email = st.text_input("Adresse Email")
+                sex = st.selectbox("Sexe", ["Masculin", "Féminin", "Autre"])
+            
+            with col2:
+                countries = {"Cameroun": "+237", "Gabon": "+241", "Sénégal": "+221", "Côte d'Ivoire": "+225", "France": "+33"}
+                nat = st.selectbox("Nationalité", list(countries.keys()))
+                code = countries[nat]
+                phone = st.text_input(f"Téléphone (Doit commencer par {code})")
+                pwd = st.text_input("Mot de passe", type='password', help="Majuscule, minuscule, chiffre requis")
 
-            # --- SUPPRESSION ---
-            st.divider()
-            if st.button("❌ Supprimer définitivement ce patient"):
-                st.session_state.db = st.session_state.db[st.session_state.db["ID"] != search_id]
-                st.warning("Patient supprimé.")
-                st.rerun()
+            if st.button("S'inscrire"):
+                # Validation robuste
+                if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+                    st.error("Email invalide.")
+                elif not check_phone(phone, code):
+                    st.error(f"Le numéro doit commencer par {code}")
+                elif len(pwd) < 6:
+                    st.error("Mot de passe trop court.")
+                else:
+                    try:
+                        c.execute('INSERT INTO users VALUES (?,?,?,?,?,?,?)', 
+                                 (email, prenom, nom, phone, hash_pwd(pwd), sex, nat))
+                        conn.commit()
+                        st.success("Compte créé avec succès ! Veuillez vous connecter.")
+                    except:
+                        st.error("Cet email est déjà utilisé.")
+
         else:
-            st.info("Aucun patient trouvé avec cet ID.")
+            st.subheader("🔑 Connexion")
+            login_email = st.text_input("Email")
+            login_pwd = st.text_input("Mot de passe", type='password')
+            if st.button("Se connecter"):
+                c.execute('SELECT * FROM users WHERE email=? AND password=?', (login_email, hash_pwd(login_pwd)))
+                data = c.fetchone()
+                if data:
+                    st.session_state.logged_in = True
+                    st.session_state.user_email = login_email
+                    st.session_state.user_name = f"{data[1]} {data[2]}"
+                    st.rerun()
+                else:
+                    st.error("Email ou mot de passe incorrect.")
 
-# --- ONGLET 3 : ANALYSE GLOBALE ---
-with tab3:
-    if not st.session_state.db.empty:
-        st.subheader("Vue d'ensemble de la population")
-        st.dataframe(st.session_state.db, use_container_width=True)
-        
-        fig = px.pie(st.session_state.db, names="Statut", title="Répartition Nutritionnelle")
-        st.plotly_chart(fig)
     else:
-        st.info("La base de données est vide.")
+        # --- L'UTILISATEUR EST CONNECTÉ ---
+        st.sidebar.title(f"👤 {st.session_state.user_name}")
+        page = st.sidebar.radio("Navigation", ["Collecte & Dashboard", "Mon Profil", "Déconnexion"])
+
+        if page == "Déconnexion":
+            st.session_state.logged_in = False
+            st.rerun()
+
+        elif page == "Mon Profil":
+            st.subheader("⚙️ Paramètres du profil")
+            c.execute('SELECT * FROM users WHERE email=?', (st.session_state.user_email,))
+            u = c.fetchone()
+            
+            with st.form("update_profile"):
+                new_fname = st.text_input("Prénom", value=u[1])
+                new_lname = st.text_input("Nom", value=u[2])
+                new_phone = st.text_input("Téléphone", value=u[3])
+                if st.form_submit_button("Mettre à jour"):
+                    c.execute('UPDATE users SET firstname=?, lastname=?, phone=? WHERE email=?', 
+                             (new_fname, new_lname, new_phone, st.session_state.user_email))
+                    conn.commit()
+                    st.success("Profil mis à jour !")
+                    st.rerun()
+
+        elif page == "Collecte & Dashboard":
+            # --- CODE DE COLLECTE PRÉCÉDENT MAIS LIÉ À L'UTILISATEUR ---
+            tab1, tab2 = st.tabs(["📥 Saisie", "📊 Historique"])
+            
+            with tab1:
+                with st.form("collecte"):
+                    pid = st.text_input("ID Patient")
+                    p_nom = st.text_input("Nom Patient")
+                    p_poids = st.number_input("Poids (kg)", 2.0, 200.0, 60.0)
+                    p_taille = st.number_input("Taille (cm)", 50, 250, 170)
+                    if st.form_submit_button("Sauvegarder"):
+                        imc = round(p_poids / ((p_taille/100)**2), 2)
+                        status = "Normal" if 18.5 <= imc < 25 else "Alerte"
+                        c.execute('INSERT INTO collectes VALUES (?,?,?,?,?,?,?,?,?)',
+                                 (pid, st.session_state.user_email, str(datetime.now().date()), p_nom, 25, p_poids, p_taille, imc, status))
+                        conn.commit()
+                        st.success("Données enregistrées en base !")
+
+            with tab2:
+                # On ne lit que les données de l'utilisateur connecté
+                c.execute('SELECT * FROM collectes WHERE user_email=?', (st.session_state.user_email,))
+                my_data = pd.DataFrame(c.fetchall(), columns=["ID", "User", "Date", "Patient", "Âge", "Poids", "Taille", "IMC", "Statut"])
+                st.dataframe(my_data)
+
+if __name__ == '__main__':
+    main()
