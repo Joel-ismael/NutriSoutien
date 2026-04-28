@@ -3,13 +3,13 @@ import pandas as pd
 import sqlite3
 import hashlib
 import re
-import plotly.express as px  # Ajouté pour le graphique
+import plotly.express as px
 from datetime import datetime
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Nutri-Soutien Cloud", page_icon="🥗", layout="wide")
 
-# --- STYLE CSS (Pour masquer GitHub) ---
+# --- STYLE CSS (Pour masquer les éléments Streamlit inutiles) ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -27,7 +27,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                 email TEXT PRIMARY KEY, firstname TEXT, lastname TEXT, 
                 phone TEXT, password TEXT, sex TEXT, nationality TEXT)''')
-    # Table des collectes
+    # Table des collectes (Liée à l'email de l'utilisateur)
     c.execute('''CREATE TABLE IF NOT EXISTS collectes (
                 id_collecte TEXT, user_email TEXT, date TEXT, patient TEXT, 
                 age INTEGER, poids REAL, taille REAL, imc REAL, statut TEXT)''')
@@ -44,15 +44,16 @@ def hash_pwd(pwd):
 def check_phone(phone, code):
     return phone.startswith(code)
 
-# --- LOGIQUE DE L'APPLICATION ---
+# --- GESTION DE LA SESSION ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_email = ""
 
 def main():
     if not st.session_state.logged_in:
-        menu = ["Connexion", "Inscription"]
-        choice = st.sidebar.selectbox("Menu", menu)
+        # --- MENU DE NAVIGATION (AVANT CONNEXION) ---
+        st.sidebar.title("🔐 Authentification")
+        choice = st.sidebar.selectbox("Menu", ["Connexion", "Inscription"])
 
         if choice == "Inscription":
             st.subheader("📝 Créer un compte professionnel")
@@ -83,9 +84,10 @@ def main():
                         c.execute('INSERT INTO users VALUES (?,?,?,?,?,?,?)', 
                                  (email, prenom, nom, phone, hash_pwd(pwd), sex, nat))
                         conn.commit()
-                        st.success("Compte créé ! Veuillez vous connecter.")
+                        st.success("Compte créé avec succès ! Veuillez vous connecter.")
                     except:
                         st.error("Cet email est déjà utilisé.")
+
         else:
             st.subheader("🔑 Connexion")
             login_email = st.text_input("Email")
@@ -102,7 +104,7 @@ def main():
                     st.error("Email ou mot de passe incorrect.")
 
     else:
-        # --- UTILISATEUR CONNECTÉ ---
+        # --- L'UTILISATEUR EST CONNECTÉ ---
         st.sidebar.title(f"👤 {st.session_state.user_name}")
         page = st.sidebar.radio("Navigation", ["Collecte & Dashboard", "Mon Profil", "Déconnexion"])
 
@@ -114,6 +116,7 @@ def main():
             st.subheader("⚙️ Paramètres du profil")
             c.execute('SELECT * FROM users WHERE email=?', (st.session_state.user_email,))
             u = c.fetchone()
+            
             with st.form("update_profile"):
                 new_fname = st.text_input("Prénom", value=u[1])
                 new_lname = st.text_input("Nom", value=u[2])
@@ -129,20 +132,28 @@ def main():
             tab1, tab2 = st.tabs(["📥 Saisie", "📊 Historique"])
             
             with tab1:
+                st.subheader("Enregistrement des données")
                 with st.form("collecte"):
-                    pid = st.text_input("ID Patient")
-                    p_nom = st.text_input("Nom Patient")
-                    p_poids = st.number_input("Poids (kg)", 2.0, 200.0, 60.0)
+                    pid = st.text_input("Identifiant Unique (ID)")
+                    p_nom = st.text_input("Nom Complet")
+                    p_poids = st.number_input("Poids (kg)", 2.0, 200.0, 65.0)
                     p_taille = st.number_input("Taille (cm)", 50, 250, 170)
-                    if st.form_submit_button("Sauvegarder"):
+                    p_age = st.number_input("Âge", 0, 120, 25)
+                    if st.form_submit_button("Enregistrer"):
                         imc = round(p_poids / ((p_taille/100)**2), 2)
-                        status = "Normal" if 18.5 <= imc < 25 else "Alerte"
+                        # Classification simplifiée
+                        if imc < 18.5: status = "Alerte"
+                        elif 18.5 <= imc < 25: status = "Normal"
+                        elif 25 <= imc < 30: status = "Surpoids"
+                        else: status = "Obésité"
+                        
                         c.execute('INSERT INTO collectes VALUES (?,?,?,?,?,?,?,?,?)',
-                                 (pid, st.session_state.user_email, str(datetime.now().date()), p_nom, 25, p_poids, p_taille, imc, status))
+                                 (pid, st.session_state.user_email, str(datetime.now().date()), p_nom, p_age, p_poids, p_taille, imc, status))
                         conn.commit()
-                        st.success("Données enregistrées !")
+                        st.success(f"Enregistré : {status}")
 
             with tab2:
+                # Lecture des données de l'utilisateur connecté
                 c.execute('SELECT * FROM collectes WHERE user_email=?', (st.session_state.user_email,))
                 my_data = pd.DataFrame(c.fetchall(), columns=["ID", "User", "Date", "Patient", "Âge", "Poids", "Taille", "IMC", "Statut"])
                 
@@ -153,6 +164,7 @@ def main():
                     st.divider()
                     st.subheader("📊 Répartition Nutritionnelle Globale")
                     
+                    # Graphique circulaire (Pie Chart)
                     fig_pie = px.pie(
                         my_data, 
                         names="Statut", 
