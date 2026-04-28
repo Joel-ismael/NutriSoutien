@@ -146,7 +146,7 @@ def main():
                         conn.commit()
                         st.success("Données enregistrées en base !")
 
-           with tab2:
+             with tab2:
                 # On ne lit que les données de l'utilisateur connecté
                 c.execute('SELECT * FROM collectes WHERE user_email=?', (st.session_state.user_email,))
                 my_data = pd.DataFrame(c.fetchall(), columns=["ID", "User", "Date", "Patient", "Âge", "Poids", "Taille", "IMC", "Statut"])
