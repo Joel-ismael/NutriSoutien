@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import hashlib
 import re
+import plotly.express as px  # Ajouté pour le graphique
 from datetime import datetime
 
 # --- CONFIGURATION ---
@@ -26,7 +27,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                 email TEXT PRIMARY KEY, firstname TEXT, lastname TEXT, 
                 phone TEXT, password TEXT, sex TEXT, nationality TEXT)''')
-    # Table des collectes (Liée à l'email de l'utilisateur)
+    # Table des collectes
     c.execute('''CREATE TABLE IF NOT EXISTS collectes (
                 id_collecte TEXT, user_email TEXT, date TEXT, patient TEXT, 
                 age INTEGER, poids REAL, taille REAL, imc REAL, statut TEXT)''')
@@ -41,7 +42,6 @@ def hash_pwd(pwd):
     return hashlib.sha256(str.encode(pwd)).hexdigest()
 
 def check_phone(phone, code):
-    # Vérifie si le numéro commence par le code pays
     return phone.startswith(code)
 
 # --- LOGIQUE DE L'APPLICATION ---
@@ -69,10 +69,9 @@ def main():
                 nat = st.selectbox("Nationalité", list(countries.keys()))
                 code = countries[nat]
                 phone = st.text_input(f"Téléphone (Doit commencer par {code})")
-                pwd = st.text_input("Mot de passe", type='password', help="Majuscule, minuscule, chiffre requis")
+                pwd = st.text_input("Mot de passe", type='password')
 
             if st.button("S'inscrire"):
-                # Validation robuste
                 if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
                     st.error("Email invalide.")
                 elif not check_phone(phone, code):
@@ -84,10 +83,9 @@ def main():
                         c.execute('INSERT INTO users VALUES (?,?,?,?,?,?,?)', 
                                  (email, prenom, nom, phone, hash_pwd(pwd), sex, nat))
                         conn.commit()
-                        st.success("Compte créé avec succès ! Veuillez vous connecter.")
+                        st.success("Compte créé ! Veuillez vous connecter.")
                     except:
                         st.error("Cet email est déjà utilisé.")
-
         else:
             st.subheader("🔑 Connexion")
             login_email = st.text_input("Email")
@@ -104,7 +102,7 @@ def main():
                     st.error("Email ou mot de passe incorrect.")
 
     else:
-        # --- L'UTILISATEUR EST CONNECTÉ ---
+        # --- UTILISATEUR CONNECTÉ ---
         st.sidebar.title(f"👤 {st.session_state.user_name}")
         page = st.sidebar.radio("Navigation", ["Collecte & Dashboard", "Mon Profil", "Déconnexion"])
 
@@ -116,7 +114,6 @@ def main():
             st.subheader("⚙️ Paramètres du profil")
             c.execute('SELECT * FROM users WHERE email=?', (st.session_state.user_email,))
             u = c.fetchone()
-            
             with st.form("update_profile"):
                 new_fname = st.text_input("Prénom", value=u[1])
                 new_lname = st.text_input("Nom", value=u[2])
@@ -129,7 +126,6 @@ def main():
                     st.rerun()
 
         elif page == "Collecte & Dashboard":
-            # --- CODE DE COLLECTE PRÉCÉDENT MAIS LIÉ À L'UTILISATEUR ---
             tab1, tab2 = st.tabs(["📥 Saisie", "📊 Historique"])
             
             with tab1:
@@ -144,10 +140,9 @@ def main():
                         c.execute('INSERT INTO collectes VALUES (?,?,?,?,?,?,?,?,?)',
                                  (pid, st.session_state.user_email, str(datetime.now().date()), p_nom, 25, p_poids, p_taille, imc, status))
                         conn.commit()
-                        st.success("Données enregistrées en base !")
+                        st.success("Données enregistrées !")
 
-             with tab2:
-                # On ne lit que les données de l'utilisateur connecté
+            with tab2:
                 c.execute('SELECT * FROM collectes WHERE user_email=?', (st.session_state.user_email,))
                 my_data = pd.DataFrame(c.fetchall(), columns=["ID", "User", "Date", "Patient", "Âge", "Poids", "Taille", "IMC", "Statut"])
                 
@@ -155,21 +150,19 @@ def main():
                     st.subheader("📋 Historique des patients")
                     st.dataframe(my_data, use_container_width=True)
                     
-                    # --- NOUVEAU : AJOUT DU PIE CHART ---
                     st.divider()
                     st.subheader("📊 Répartition Nutritionnelle Globale")
                     
-                    # Création du graphique avec des couleurs fixes pour la cohérence
                     fig_pie = px.pie(
                         my_data, 
                         names="Statut", 
-                        hole=0.4, # Transforme le camembert en "Doughnut" plus moderne
+                        hole=0.4,
                         color="Statut",
                         color_discrete_map={
-                            "Normal": "#2ecc71", # Vert
-                            "Alerte": "#e74c3c", # Rouge
-                            "Obésité": "#e67e22",# Orange
-                            "Surpoids": "#f1c40f" # Jaune
+                            "Normal": "#2ecc71", 
+                            "Alerte": "#e74c3c", 
+                            "Obésité": "#e67e22",
+                            "Surpoids": "#f1c40f"
                         }
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
