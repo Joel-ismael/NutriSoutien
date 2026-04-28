@@ -3,152 +3,141 @@ import pandas as pd
 import sqlite3
 import hashlib
 import re
-import plotly.express as px
 from datetime import datetime
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Nutri-Soutien Cloud", page_icon="🥗", layout="wide")
+st.set_page_config(page_title="Nutri-Soutien", page_icon="🥗", layout="wide")
 
-# --- STYLE CSS POUR NETTOYER L'INTERFACE ---
+# --- STYLE CSS ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .stAppDeployButton {display:none;}
-    /* Force la sidebar à être visible */
-    [data-testid="stSidebar"] {
-        background-color: #f8f9fa;
-    }
+    .welcome-text { text-align: center; color: #2ecc71; font-weight: bold; font-size: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- INITIALISATION DE LA BASE DE DONNÉES ---
+# --- BASE DE DONNÉES ---
 def init_db():
-    conn = sqlite3.connect('nutrisoutien_data.db', check_same_thread=False)
+    conn = sqlite3.connect('nutri_data.db', check_same_thread=False)
     c = conn.cursor()
-    # Table Utilisateurs
     c.execute('''CREATE TABLE IF NOT EXISTS users (
-                email TEXT PRIMARY KEY, firstname TEXT, lastname TEXT, 
-                phone TEXT, password TEXT, sex TEXT, nationality TEXT)''')
-    # Table Collectes
+                email TEXT PRIMARY KEY, nom TEXT, prenom TEXT, 
+                dob TEXT, pays TEXT, phone TEXT, sex TEXT, password TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS collectes (
-                id_collecte TEXT, user_email TEXT, date TEXT, patient TEXT, 
-                age INTEGER, poids REAL, taille REAL, imc REAL, statut TEXT)''')
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_email TEXT, 
+                date TEXT, patient TEXT, imc REAL, statut TEXT)''')
     conn.commit()
     return conn
 
 conn = init_db()
 c = conn.cursor()
 
-# --- SÉCURITÉ ---
 def hash_pwd(pwd):
     return hashlib.sha256(str.encode(pwd)).hexdigest()
 
-# --- INITIALISATION DE LA SESSION ---
+# --- INITIALISATION SESSION ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_email = ""
 
+# --- LOGIQUE PRINCIPALE ---
 def main():
-    # --- BARRE LATÉRALE (SIDEBAR) ---
-    st.sidebar.title("🥗 Nutri-Soutien")
+    # BARRE LATÉRALE (Toujours visible)
+    st.sidebar.title("📌 Menu Principal")
     
     if not st.session_state.logged_in:
-        # CE MENU S'AFFICHE QUAND ON N'EST PAS CONNECTÉ
-        st.sidebar.subheader("Accès Professionnel")
-        auth_choice = st.sidebar.radio("Choisir une action :", ["Connexion", "Inscription"])
+        auth_mode = st.sidebar.radio("Navigation", ["Connexion", "Inscription"])
+        
+        # Message de bienvenue en bas de la sidebar
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("<div class='welcome-text'>✅ Bienvenue sur l'application officielle Nutri-Soutien Cloud.</div>", unsafe_allow_html=True)
 
-        if auth_choice == "Inscription":
-            st.subheader("📝 Créer un compte professionnel")
+        if auth_mode == "Inscription":
+            st.header("📝 Créer votre compte")
             col1, col2 = st.columns(2)
             
             with col1:
                 nom = st.text_input("Nom")
                 prenom = st.text_input("Prénom")
-                email = st.text_input("Adresse Email")
-                sexe = st.selectbox("Sexe", ["Masculin", "Féminin"])
+                dob = st.date_input("Date de naissance", min_value=datetime(1940, 1, 1))
+                sex = st.selectbox("Sexe", ["Masculin", "Féminin", "Autre"])
             
             with col2:
-                pays = {"Cameroun": "+237", "Gabon": "+241", "Sénégal": "+221", "France": "+33"}
-                nat = st.selectbox("Pays de résidence", list(pays.keys()))
-                phone = st.text_input(f"Téléphone ({pays[nat]})")
-                pwd = st.text_input("Mot de passe", type='password')
+                # Dictionnaire des codes pays
+                pays_codes = {"Cameroun": "+237", "Gabon": "+241", "Sénégal": "+221", "France": "+33", "Côte d'Ivoire": "+225"}
+                pays_sel = st.selectbox("Pays", list(pays_codes.keys()))
+                code_pays = pays_codes[pays_sel]
+                phone = st.text_input(f"Téléphone (Doit commencer par {code_pays})")
+                email = st.text_input("Adresse Email")
+                pwd = st.text_input("Créer un mot de passe", type='password')
 
-            if st.button("Valider l'inscription"):
-                if email and pwd and nom:
-                    try:
-                        c.execute('INSERT INTO users VALUES (?,?,?,?,?,?,?)', 
-                                 (email, prenom, nom, phone, hash_pwd(pwd), sexe, nat))
-                        conn.commit()
-                        st.success("Compte créé ! Sélectionnez 'Connexion' dans le menu à gauche.")
-                    except:
-                        st.error("Cet email est déjà enregistré.")
+            if st.button("S'inscrire"):
+                if not phone.startswith(code_pays):
+                    st.error(f"Le numéro pour le {pays_sel} doit commencer par {code_pays}")
+                elif not (email and nom and pwd):
+                    st.warning("Veuillez remplir tous les champs.")
                 else:
-                    st.warning("Veuillez remplir les champs obligatoires.")
+                    try:
+                        c.execute('INSERT INTO users VALUES (?,?,?,?,?,?,?,?)', 
+                                 (email, nom, prenom, str(dob), pays_sel, phone, sex, hash_pwd(pwd)))
+                        conn.commit()
+                        st.success("Compte créé ! Vous pouvez maintenant vous connecter dans le menu à gauche.")
+                    except:
+                        st.error("Cet email est déjà utilisé.")
 
-        else:
-            st.subheader("🔑 Connexion")
-            login_email = st.text_input("Email")
-            login_pwd = st.text_input("Mot de passe", type='password')
+        else: # Mode Connexion
+            st.header("🔑 Connexion")
+            # Comme demandé : Nom, Prénom et Mot de passe
+            c_nom = st.text_input("Nom")
+            c_prenom = st.text_input("Prénom")
+            c_pwd = st.text_input("Mot de passe", type='password')
             
-            if st.button("Se connecter"):
-                c.execute('SELECT * FROM users WHERE email=? AND password=?', (login_email, hash_pwd(login_pwd)))
-                data = c.fetchone()
-                if data:
+            if st.button("Accéder à la plateforme"):
+                c.execute('SELECT email FROM users WHERE nom=? AND prenom=? AND password=?', 
+                         (c_nom, c_prenom, hash_pwd(c_pwd)))
+                user = c.fetchone()
+                if user:
                     st.session_state.logged_in = True
-                    st.session_state.user_email = login_email
-                    st.session_state.user_name = f"{data[1]} {data[2]}"
+                    st.session_state.user_email = user[0]
+                    st.session_state.user_name = f"{c_prenom} {c_nom}"
                     st.rerun()
                 else:
-                    st.error("Email ou mot de passe incorrect.")
+                    st.error("Identifiants incorrects.")
 
     else:
-        # --- MENU QUAND L'UTILISATEUR EST CONNECTÉ ---
-        st.sidebar.success(f"Bienvenue, {st.session_state.user_name}")
-        page = st.sidebar.radio("Navigation", ["Collecte & Dashboard", "Mon Profil", "Déconnexion"])
+        # --- UTILISATEUR CONNECTÉ ---
+        st.sidebar.success(f"Connecté : {st.session_state.user_name}")
+        app_page = st.sidebar.radio("Navigation", ["Saisie de données", "Historique", "Déconnexion"])
 
-        if page == "Déconnexion":
+        if app_page == "Déconnexion":
             st.session_state.logged_in = False
             st.rerun()
 
-        elif page == "Mon Profil":
-            st.subheader("⚙️ Paramètres du compte")
-            c.execute('SELECT * FROM users WHERE email=?', (st.session_state.user_email,))
-            u = c.fetchone()
-            st.info(f"Email : {u[0]} | Nom : {u[2]} | Téléphone : {u[3]}")
+        elif app_page == "Saisie de données":
+            st.header("📥 Enregistrement Patient")
+            with st.form("data_form"):
+                p_nom = st.text_input("Nom du patient")
+                p_poids = st.number_input("Poids (kg)", 1.0, 250.0, 70.0)
+                p_taille = st.number_input("Taille (cm)", 40, 250, 170)
+                if st.form_submit_button("Sauvegarder"):
+                    imc = round(p_poids / ((p_taille/100)**2), 2)
+                    statut = "Normal" if 18.5 <= imc < 25 else "Alerte"
+                    c.execute('INSERT INTO collectes (user_email, date, patient, imc, statut) VALUES (?,?,?,?,?)',
+                             (st.session_state.user_email, str(datetime.now().date()), p_nom, imc, statut))
+                    conn.commit()
+                    st.success(f"Données enregistrées pour {p_nom}")
 
-        elif page == "Collecte & Dashboard":
-            tab1, tab2 = st.tabs(["📥 Saisie de données", "📊 Historique & Analyse"])
-            
-            with tab1:
-                st.subheader("Nouveau Patient")
-                with st.form("form_saisie"):
-                    p_nom = st.text_input("Nom du patient")
-                    p_poids = st.number_input("Poids (kg)", 1.0, 250.0, 70.0)
-                    p_taille = st.number_input("Taille (cm)", 40, 250, 170)
-                    submit = st.form_submit_button("Enregistrer")
-                    
-                    if submit:
-                        imc = round(p_poids / ((p_taille/100)**2), 2)
-                        statut = "Normal" if 18.5 <= imc < 25 else "Alerte"
-                        c.execute('INSERT INTO collectes VALUES (?,?,?,?,?,?,?,?,?)',
-                                 ("ID", st.session_state.user_email, str(datetime.now().date()), p_nom, 25, p_poids, p_taille, imc, statut))
-                        conn.commit()
-                        st.success(f"Patient enregistré ! IMC : {imc}")
-
-            with tab2:
-                c.execute('SELECT * FROM collectes WHERE user_email=?', (st.session_state.user_email,))
-                df = pd.DataFrame(c.fetchall(), columns=["ID", "User", "Date", "Patient", "Âge", "Poids", "Taille", "IMC", "Statut"])
-                
-                if not df.empty:
-                    st.dataframe(df, use_container_width=True)
-                    st.divider()
-                    fig = px.pie(df, names="Statut", hole=0.4, title="Répartition des statuts",
-                                 color="Statut", color_discrete_map={"Normal": "#2ecc71", "Alerte": "#e74c3c"})
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Aucune donnée enregistrée pour le moment.")
+        elif app_page == "Historique":
+            st.header("📊 Vos anciennes données")
+            c.execute('SELECT date, patient, imc, statut FROM collectes WHERE user_email=?', (st.session_state.user_email,))
+            df = pd.DataFrame(c.fetchall(), columns=["Date", "Patient", "IMC", "Statut"])
+            if not df.empty:
+                st.table(df)
+            else:
+                st.info("Aucune donnée enregistrée.")
 
 if __name__ == '__main__':
     main()
